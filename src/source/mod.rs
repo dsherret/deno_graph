@@ -49,6 +49,25 @@ pub struct CacheInfo {
   pub map: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleLoadResponse {
+  /// The final specifier of the module.
+  pub specifier: ModuleSpecifier,
+  /// If the module is a remote module, the headers should be returned as a
+  /// hashmap of lower-cased string values.
+  #[serde(rename = "headers", skip_serializing_if = "Option::is_none")]
+  pub maybe_headers: Option<HashMap<String, String>>,
+  /// The content of the remote module.
+  pub content: Arc<[u8]>,
+}
+
+impl From<ModuleLoadResponse> for LoadResponse {
+  fn from(response: ModuleLoadResponse) -> Self {
+    LoadResponse::Module(response)
+  }
+}
+
 /// The response that is expected from a loader's `.load()` method.
 ///
 /// The returned specifier is the final specifier. This can differ from the
@@ -61,16 +80,7 @@ pub enum LoadResponse {
   /// `ModuleKind::External` and no dependency analysis will be performed.
   External { specifier: ModuleSpecifier },
   /// A loaded module.
-  Module {
-    /// The content of the remote module.
-    content: Arc<[u8]>,
-    /// The final specifier of the module.
-    specifier: ModuleSpecifier,
-    /// If the module is a remote module, the headers should be returned as a
-    /// hashmap of lower-cased string values.
-    #[serde(rename = "headers", skip_serializing_if = "Option::is_none")]
-    maybe_headers: Option<HashMap<String, String>>,
-  },
+  Module(ModuleLoadResponse),
 }
 
 pub type LoadResult = Result<Option<LoadResponse>, anyhow::Error>;
@@ -305,19 +315,19 @@ pub trait NpmResolver: fmt::Debug {
 
 pub fn load_data_url(
   specifier: &ModuleSpecifier,
-) -> Result<Option<LoadResponse>, anyhow::Error> {
+) -> Result<ModuleLoadResponse, anyhow::Error> {
   let url = DataUrl::process(specifier.as_str())
     .map_err(|_| anyhow!("Unable to decode data url."))?;
   let (bytes, _) = url
     .decode_to_vec()
     .map_err(|_| anyhow!("Unable to decode data url."))?;
-  let mut headers: HashMap<String, String> = HashMap::with_capacity(1);
-  headers.insert("content-type".to_string(), url.mime_type().to_string());
-  Ok(Some(LoadResponse::Module {
+  let headers =
+    HashMap::from([("content-type".to_string(), url.mime_type().to_string())]);
+  Ok(ModuleLoadResponse {
     specifier: specifier.clone(),
     maybe_headers: Some(headers),
     content: Arc::from(bytes),
-  }))
+  })
 }
 
 /// An implementation of the loader attribute where the responses are provided
@@ -345,7 +355,7 @@ impl<S: AsRef<str>> Source<S> {
         specifier,
         maybe_headers,
         content,
-      } => Ok(LoadResponse::Module {
+      } => Ok(LoadResponse::Module(ModuleLoadResponse {
         specifier: ModuleSpecifier::parse(specifier.as_ref()).unwrap(),
         maybe_headers: maybe_headers.map(|h| {
           h.into_iter()
@@ -353,7 +363,7 @@ impl<S: AsRef<str>> Source<S> {
             .collect()
         }),
         content: Arc::from(content.as_ref().to_string().into_bytes()),
-      }),
+      })),
       Source::External(specifier) => Ok(LoadResponse::External {
         specifier: ModuleSpecifier::parse(specifier.as_ref()).unwrap(),
       }),
@@ -457,7 +467,9 @@ impl Loader for MemoryLoader {
     let response = match self.sources.get(specifier) {
       Some(Ok(response)) => Ok(Some(response.clone())),
       Some(Err(err)) => Err(anyhow!("{}", err)),
-      None if specifier.scheme() == "data" => load_data_url(specifier),
+      None if specifier.scheme() == "data" => {
+        load_data_url(specifier).map(|m| Some(LoadResponse::Module(m)))
+      }
       _ => Ok(None),
     };
     Box::pin(future::ready(response))

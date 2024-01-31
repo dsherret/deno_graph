@@ -12,7 +12,9 @@ use deno_graph::source::load_data_url;
 use deno_graph::source::CacheInfo;
 use deno_graph::source::CacheSetting;
 use deno_graph::source::LoadFuture;
+use deno_graph::source::LoadResponse;
 use deno_graph::source::Loader;
+use deno_graph::source::ModuleLoadResponse;
 use deno_graph::source::NullFileSystem;
 use deno_graph::source::ResolutionMode;
 use deno_graph::source::ResolveError;
@@ -69,7 +71,9 @@ impl Loader for JsLoader {
     cache_setting: CacheSetting,
   ) -> LoadFuture {
     if specifier.scheme() == "data" {
-      Box::pin(future::ready(load_data_url(specifier)))
+      Box::pin(future::ready(
+        load_data_url(specifier).map(|m| Some(LoadResponse::Module(m))),
+      ))
     } else {
       let specifier = specifier.clone();
       let context = JsValue::null();

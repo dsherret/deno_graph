@@ -2579,11 +2579,11 @@ impl From<LoadResponse> for PendingInfoResponse {
   fn from(load_response: LoadResponse) -> Self {
     match load_response {
       LoadResponse::External { specifier } => Self::External { specifier },
-      LoadResponse::Module {
+      LoadResponse::Module(ModuleLoadResponse {
         content,
         specifier,
         maybe_headers,
-      } => Self::Module {
+      }) => Self::Module {
         content_or_module_info: ContentOrModuleInfo::Content(content),
         specifier,
         maybe_headers,
@@ -3132,11 +3132,11 @@ impl<'a, 'graph> Builder<'a, 'graph> {
                 ),
               );
             }
-            LoadResponse::Module {
+            LoadResponse::Module(ModuleLoadResponse {
               content,
               specifier,
               maybe_headers: _maybe_headers,
-            } => {
+            }) => {
               if specifier == item.specifier {
                 self.loader.cache_module_info(
                   &specifier,
@@ -3652,7 +3652,7 @@ impl<'a, 'graph> Builder<'a, 'graph> {
     let fut = async move {
       let data = fut.await.map_err(Arc::new)?;
       match data {
-        Some(LoadResponse::Module { content, .. }) => {
+        Some(LoadResponse::Module(ModuleLoadResponse { content, .. })) => {
           let package_info: JsrPackageInfo =
             serde_json::from_slice(&content).map_err(|e| Arc::new(e.into()))?;
           Ok(Some(Arc::new(package_info)))
@@ -3694,7 +3694,7 @@ impl<'a, 'graph> Builder<'a, 'graph> {
     let fut = async move {
       let data = fut.await.map_err(Arc::new)?;
       match data {
-        Some(LoadResponse::Module { content, .. }) => {
+        Some(LoadResponse::Module(ModuleLoadResponse { content, .. })) => {
           let version_info: JsrPackageVersionInfo =
             serde_json::from_slice(&content).map_err(|e| Arc::new(e.into()))?;
           Ok(Arc::new(version_info))
@@ -4468,33 +4468,33 @@ mod tests {
             assert!(!is_dynamic);
             self.loaded_foo = true;
             Box::pin(async move {
-              Ok(Some(LoadResponse::Module {
+              Ok(Some(LoadResponse::Module(ModuleLoadResponse {
                 specifier: specifier.clone(),
                 maybe_headers: None,
                 content: b"await import('file:///bar.js')".to_vec().into(),
-              }))
+              })))
             })
           }
           "file:///bar.js" => {
             assert!(is_dynamic);
             self.loaded_bar = true;
             Box::pin(async move {
-              Ok(Some(LoadResponse::Module {
+              Ok(Some(LoadResponse::Module(ModuleLoadResponse {
                 specifier: specifier.clone(),
                 maybe_headers: None,
                 content: b"import 'file:///baz.js'".to_vec().into(),
-              }))
+              })))
             })
           }
           "file:///baz.js" => {
             assert!(is_dynamic);
             self.loaded_baz = true;
             Box::pin(async move {
-              Ok(Some(LoadResponse::Module {
+              Ok(Some(LoadResponse::Module(ModuleLoadResponse {
                 specifier: specifier.clone(),
                 maybe_headers: None,
                 content: b"console.log('Hello, world!')".to_vec().into(),
-              }))
+              })))
             })
           }
           _ => unreachable!(),
@@ -4534,11 +4534,11 @@ mod tests {
         let specifier = specifier.clone();
         match specifier.as_str() {
           "file:///foo.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: specifier.clone(),
               maybe_headers: None,
               content: b"await import('file:///bar.js')".to_vec().into(),
-            }))
+            })))
           }),
           "file:///bar.js" => Box::pin(async move { Ok(None) }),
           _ => unreachable!(),
@@ -4621,18 +4621,18 @@ mod tests {
         let specifier = specifier.clone();
         match specifier.as_str() {
           "file:///foo.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: Url::parse("file:///foo_actual.js").unwrap(),
               maybe_headers: None,
               content: b"import 'file:///bar.js'".to_vec().into(),
-            }))
+            })))
           }),
           "file:///bar.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: Url::parse("file:///bar_actual.js").unwrap(),
               maybe_headers: None,
               content: b"(".to_vec().into(),
-            }))
+            })))
           }),
           _ => unreachable!(),
         }
@@ -4689,34 +4689,34 @@ mod tests {
         let specifier = specifier.clone();
         match specifier.as_str() {
           "https://deno.land/foo.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse  {
               specifier: specifier.clone(),
               maybe_headers: None,
               content:
                 b"import 'FILE:///baz.js'; import 'file:///bar.js'; import 'http://deno.land/foo.js';"
                   .to_vec().into(),
-            }))
+            })))
           }),
           "http://deno.land/foo.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: specifier.clone(),
               maybe_headers: None,
               content: b"export {}".to_vec().into(),
-            }))
+            })))
           }),
           "file:///bar.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: specifier.clone(),
               maybe_headers: None,
               content: b"console.log('Hello, world!')".to_vec().into(),
-            }))
+            })))
           }),
           "file:///baz.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: specifier.clone(),
               maybe_headers: None,
               content: b"console.log('Hello, world 2!')".to_vec().into(),
-            }))
+            })))
           }),
           _ => unreachable!(),
         }
@@ -4814,24 +4814,24 @@ mod tests {
         let specifier = specifier.clone();
         match specifier.as_str() {
           "file:///foo.js" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: specifier.clone(),
               maybe_headers: None,
               content:
                 b"import 'file:///bar.js'; await import('file:///bar.js')"
                   .to_vec()
                   .into(),
-            }))
+            })))
           }),
           "file:///bar.js" => {
             assert!(!is_dynamic);
             self.loaded_bar = true;
             Box::pin(async move {
-              Ok(Some(LoadResponse::Module {
+              Ok(Some(LoadResponse::Module(ModuleLoadResponse {
                 specifier: specifier.clone(),
                 maybe_headers: None,
                 content: b"console.log('Hello, world!')".to_vec().into(),
-              }))
+              })))
             })
           }
           _ => unreachable!(),
@@ -4863,7 +4863,7 @@ mod tests {
         let specifier = specifier.clone();
         match specifier.as_str() {
           "file:///foo.ts" => Box::pin(async move {
-            Ok(Some(LoadResponse::Module {
+            Ok(Some(LoadResponse::Module(ModuleLoadResponse {
               specifier: specifier.clone(),
               maybe_headers: None,
               content: b"
@@ -4879,26 +4879,26 @@ mod tests {
               "
               .to_vec()
               .into(),
-            }))
+            })))
           }),
           "file:///bar.ts" => {
             assert!(!is_dynamic);
             Box::pin(async move {
-              Ok(Some(LoadResponse::Module {
+              Ok(Some(LoadResponse::Module(ModuleLoadResponse {
                 specifier: specifier.clone(),
                 maybe_headers: None,
                 content: b"".to_vec().into(),
-              }))
+              })))
             })
           }
           "file:///baz.json" => {
             assert!(!is_dynamic);
             Box::pin(async move {
-              Ok(Some(LoadResponse::Module {
+              Ok(Some(LoadResponse::Module(ModuleLoadResponse {
                 specifier: specifier.clone(),
                 maybe_headers: None,
                 content: b"{}".to_vec().into(),
-              }))
+              })))
             })
           }
           _ => unreachable!(),
