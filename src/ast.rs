@@ -5,8 +5,8 @@ use crate::analyzer::DependencyDescriptor;
 use crate::analyzer::DynamicArgument;
 use crate::analyzer::DynamicDependencyDescriptor;
 use crate::analyzer::DynamicTemplatePart;
+use crate::analyzer::JsModuleInfo;
 use crate::analyzer::ModuleAnalyzer;
-use crate::analyzer::ModuleInfo;
 use crate::analyzer::PositionRange;
 use crate::analyzer::SpecifierWithRange;
 use crate::analyzer::StaticDependencyDescriptor;
@@ -223,10 +223,10 @@ impl<'a> DefaultModuleAnalyzer<'a> {
   }
 
   /// Gets the module info from a parsed source.
-  pub fn module_info(parsed_source: &ParsedSource) -> ModuleInfo {
+  pub fn module_info(parsed_source: &ParsedSource) -> JsModuleInfo {
     let module = match parsed_source.program_ref() {
       deno_ast::swc::ast::Program::Module(m) => m,
-      deno_ast::swc::ast::Program::Script(_) => return ModuleInfo::default(),
+      deno_ast::swc::ast::Program::Script(_) => return JsModuleInfo::default(),
     };
     Self::module_info_from_swc(
       parsed_source.media_type(),
@@ -241,9 +241,9 @@ impl<'a> DefaultModuleAnalyzer<'a> {
     module: &deno_ast::swc::ast::Module,
     text_info: &SourceTextInfo,
     comments: &MultiThreadedComments,
-  ) -> ModuleInfo {
+  ) -> JsModuleInfo {
     let start_pos = module.start();
-    ModuleInfo {
+    JsModuleInfo {
       dependencies: analyze_dependencies(module, text_info, comments),
       ts_references: analyze_ts_references(start_pos, text_info, comments),
       jsx_import_source: analyze_jsx_import_source(
@@ -255,12 +255,12 @@ impl<'a> DefaultModuleAnalyzer<'a> {
 }
 
 impl<'a> ModuleAnalyzer for DefaultModuleAnalyzer<'a> {
-  fn analyze(
+  fn analyze_js(
     &self,
     specifier: &deno_ast::ModuleSpecifier,
     source: Arc<str>,
     media_type: MediaType,
-  ) -> Result<ModuleInfo, Diagnostic> {
+  ) -> Result<JsModuleInfo, Diagnostic> {
     let default_parser = DefaultModuleParser;
     let parser = self.parser.unwrap_or(&default_parser);
     let parsed_source = parser.parse_module(ParseOptions {
@@ -307,15 +307,15 @@ impl CapturingModuleAnalyzer {
 }
 
 impl ModuleAnalyzer for CapturingModuleAnalyzer {
-  fn analyze(
+  fn analyze_js(
     &self,
     specifier: &deno_ast::ModuleSpecifier,
     source: Arc<str>,
     media_type: MediaType,
-  ) -> Result<ModuleInfo, Diagnostic> {
+  ) -> Result<JsModuleInfo, Diagnostic> {
     let capturing_parser = self.as_capturing_parser();
     let module_analyzer = DefaultModuleAnalyzer::new(&capturing_parser);
-    module_analyzer.analyze(specifier, source, media_type)
+    module_analyzer.analyze_js(specifier, source, media_type)
   }
 }
 

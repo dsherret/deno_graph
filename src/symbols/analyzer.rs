@@ -82,10 +82,9 @@ impl<'a> RootSymbol<'a> {
     };
 
     match graph_module {
-      crate::Module::Js(js_module) => self.analyze_js_module(js_module),
-      crate::Module::Json(json_module) => {
-        Some(self.analyze_json_module(json_module))
-      }
+      crate::Module::Js(module) => self.analyze_js_module(module),
+      crate::Module::Json(module) => Some(self.analyze_json_module(module)),
+      crate::Module::Wasm(module) => self.analyze_wasm_module(module),
       crate::Module::Npm(_)
       | crate::Module::Node(_)
       | crate::Module::External(_) => None,

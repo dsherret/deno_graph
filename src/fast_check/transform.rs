@@ -87,8 +87,8 @@ use deno_ast::SourceTextInfo;
 
 use crate::DefaultModuleAnalyzer;
 use crate::DiagnosticRange;
+use crate::JsModuleInfo;
 use crate::ModuleGraph;
-use crate::ModuleInfo;
 use crate::WorkspaceMember;
 
 use super::range_finder::ModulePublicRanges;
@@ -140,7 +140,7 @@ impl CommentsMut {
 }
 
 pub struct FastCheckModule {
-  pub module_info: ModuleInfo,
+  pub module_info: JsModuleInfo,
   pub text: String,
   pub source_map: Vec<u8>,
 }

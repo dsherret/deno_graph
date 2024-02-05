@@ -5,7 +5,7 @@ use crate::module_specifier::resolve_import;
 use crate::packages::JsrPackageInfo;
 use crate::packages::JsrPackageVersionInfo;
 use crate::text_encoding;
-use crate::ModuleInfo;
+use crate::JsModuleInfo;
 use crate::SpecifierError;
 use deno_ast::MediaType;
 use deno_semver::package::PackageNv;
@@ -145,7 +145,7 @@ pub trait Loader {
     &mut self,
     _specifier: &ModuleSpecifier,
     _source: &Arc<[u8]>,
-    _module_info: &ModuleInfo,
+    _module_info: &JsModuleInfo,
   ) {
   }
 }

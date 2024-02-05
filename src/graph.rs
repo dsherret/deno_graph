@@ -4,8 +4,8 @@ use crate::analyzer::analyze_deno_types;
 use crate::analyzer::DependencyDescriptor;
 use crate::analyzer::DynamicArgument;
 use crate::analyzer::DynamicTemplatePart;
+use crate::analyzer::JsModuleInfo;
 use crate::analyzer::ModuleAnalyzer;
-use crate::analyzer::ModuleInfo;
 use crate::analyzer::PositionRange;
 use crate::analyzer::SpecifierWithRange;
 use crate::analyzer::TypeScriptReference;
@@ -699,6 +699,7 @@ pub enum Module {
   // todo(#239): remove this when updating the --json output for 2.0
   #[serde(rename = "asserted")]
   Json(JsonModule),
+  Wasm(WasmModule),
   Npm(NpmModule),
   Node(BuiltInNodeModule),
   External(ExternalModule),
@@ -709,6 +710,7 @@ impl Module {
     match self {
       Module::Js(module) => &module.specifier,
       Module::Json(module) => &module.specifier,
+      Module::Wasm(module) => &module.specifier,
       Module::Npm(module) => &module.specifier,
       Module::Node(module) => &module.specifier,
       Module::External(module) => &module.specifier,
@@ -804,6 +806,21 @@ impl JsonModule {
   }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmModule {
+  pub specifier: ModuleSpecifier,
+  #[serde(rename = "typesDependency", skip_serializing_if = "Option::is_none")]
+  pub maybe_types_dependency: Option<TypesDependency>,
+  #[serde(rename = "size", serialize_with = "serialize_source_bytes")]
+  pub source: Arc<[u8]>,
+  #[serde(
+    skip_serializing_if = "IndexMap::is_empty",
+    serialize_with = "serialize_dependencies"
+  )]
+  pub dependencies: IndexMap<String, Dependency>,
+}
+
 #[derive(Debug, Clone)]
 pub enum FastCheckTypeModuleSlot {
   Module(Box<FastCheckTypeModule>),
@@ -820,6 +837,11 @@ pub struct FastCheckTypeModule {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsModule {
+  pub specifier: ModuleSpecifier,
+  #[serde(skip_serializing_if = "is_media_type_unknown")]
+  pub media_type: MediaType,
+  #[serde(rename = "size", serialize_with = "serialize_source")]
+  pub source: Arc<str>,
   #[serde(
     skip_serializing_if = "IndexMap::is_empty",
     serialize_with = "serialize_dependencies"
@@ -827,13 +849,8 @@ pub struct JsModule {
   pub dependencies: IndexMap<String, Dependency>,
   #[serde(flatten, skip_serializing_if = "Option::is_none")]
   pub maybe_cache_info: Option<CacheInfo>,
-  #[serde(rename = "size", serialize_with = "serialize_source")]
-  pub source: Arc<str>,
   #[serde(rename = "typesDependency", skip_serializing_if = "Option::is_none")]
   pub maybe_types_dependency: Option<TypesDependency>,
-  #[serde(skip_serializing_if = "is_media_type_unknown")]
-  pub media_type: MediaType,
-  pub specifier: ModuleSpecifier,
   #[serde(skip_serializing)]
   pub fast_check: Option<FastCheckTypeModuleSlot>,
 }
@@ -1129,6 +1146,39 @@ impl<'a> Iterator for ModuleEntryIterator<'a> {
               let mut resolutions = Vec::with_capacity(2);
               resolutions.push(&dep.maybe_code);
               if check_types {
+                resolutions.push(&dep.maybe_type);
+              }
+              #[allow(clippy::manual_flatten)]
+              for resolution in resolutions {
+                if let Resolution::Ok(resolved) = resolution {
+                  let specifier = &resolved.specifier;
+                  if self.seen.insert(specifier) {
+                    self.visiting.push_front(specifier);
+                  }
+                }
+              }
+            }
+          }
+        }
+        Module::Wasm(module) => {
+          if self.follow_type_only {
+            if let Some(Resolution::Ok(resolved)) = module
+              .maybe_types_dependency
+              .as_ref()
+              .map(|d| &d.dependency)
+            {
+              let specifier = &resolved.specifier;
+              if self.seen.insert(specifier) {
+                self.visiting.push_front(specifier);
+              }
+            }
+          }
+          let module_deps = &module.dependencies;
+          for dep in module_deps.values().rev() {
+            if !dep.is_dynamic || self.follow_dynamic {
+              let mut resolutions = Vec::with_capacity(2);
+              resolutions.push(&dep.maybe_code);
+              if self.follow_type_only {
                 resolutions.push(&dep.maybe_type);
               }
               #[allow(clippy::manual_flatten)]
@@ -1589,6 +1639,10 @@ impl ModuleGraph {
         let dependency = referring_module.dependencies.get(specifier)?;
         self.resolve_dependency_from_dep(dependency, prefer_types)
       }
+      Module::Wasm(referring_module) => {
+        let dependency = referring_module.dependencies.get(specifier)?;
+        self.resolve_dependency_from_dep(dependency, prefer_types)
+      }
       Module::Json(_)
       | Module::Npm(_)
       | Module::Node(_)
@@ -1882,7 +1936,7 @@ pub(crate) fn parse_module(
     | MediaType::Dcts => {
       let source = new_source_with_text(specifier, content, maybe_charset)
         .map_err(|err| *err)?;
-      match module_analyzer.analyze(specifier, source.clone(), media_type) {
+      match module_analyzer.analyze_js(specifier, source.clone(), media_type) {
         Ok(module_info) => {
           // Return the module as a valid module
           Ok(Module::Js(parse_js_module_from_module_info(
@@ -1905,7 +1959,7 @@ pub(crate) fn parse_module(
     MediaType::Unknown if is_root => {
       let source = new_source_with_text(specifier, content, maybe_charset)
         .map_err(|err| *err)?;
-      match module_analyzer.analyze(
+      match module_analyzer.analyze_js(
         specifier,
         source.clone(),
         MediaType::JavaScript,
@@ -1947,7 +2001,7 @@ pub(crate) fn parse_js_module_from_module_info(
   specifier: &ModuleSpecifier,
   media_type: MediaType,
   maybe_headers: Option<&HashMap<String, String>>,
-  module_info: ModuleInfo,
+  module_info: JsModuleInfo,
   source: Arc<str>,
   file_system: &dyn FileSystem,
   maybe_resolver: Option<&dyn Resolver>,
@@ -2639,7 +2693,7 @@ struct PendingContentLoadItem {
   specifier: ModuleSpecifier,
   maybe_range: Option<Range>,
   result: LoadResult,
-  module_info: ModuleInfo,
+  module_info: JsModuleInfo,
 }
 
 type PendingResult<T> =
@@ -2671,7 +2725,7 @@ struct PendingState {
 #[derive(Clone)]
 enum ContentOrModuleInfo {
   Content(Arc<[u8]>),
-  ModuleInfo(ModuleInfo),
+  ModuleInfo(JsModuleInfo),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3172,6 +3226,9 @@ impl<'a, 'graph> Builder<'a, 'graph> {
                           Err(err) => *slot = ModuleSlot::Err(*err),
                         }
                       }
+                      Module::Wasm(module) => {
+                        module.source = content;
+                      }
                       Module::Npm(_)
                       | Module::Node(_)
                       | Module::External(_) => {
@@ -3237,7 +3294,10 @@ impl<'a, 'graph> Builder<'a, 'graph> {
             module.maybe_cache_info =
               self.loader.get_cache_info(&module.specifier);
           }
-          Module::External(_) | Module::Npm(_) | Module::Node(_) => {}
+          Module::Wasm(_)
+          | Module::External(_)
+          | Module::Npm(_)
+          | Module::Node(_) => {}
         }
       }
     }
@@ -3771,15 +3831,15 @@ impl<'a, 'graph> Builder<'a, 'graph> {
     maybe_referrer: Option<Range>,
     maybe_version_info: Option<&JsrPackageVersionInfoExt>,
   ) -> ModuleSlot {
-    struct ProvidedModuleAnalyzer(RefCell<Option<ModuleInfo>>);
+    struct ProvidedModuleAnalyzer(RefCell<Option<JsModuleInfo>>);
 
     impl ModuleAnalyzer for ProvidedModuleAnalyzer {
-      fn analyze(
+      fn analyze_js(
         &self,
         _specifier: &ModuleSpecifier,
         _source: Arc<str>,
         _media_type: MediaType,
-      ) -> Result<ModuleInfo, Diagnostic> {
+      ) -> Result<JsModuleInfo, Diagnostic> {
         Ok(self.0.borrow_mut().take().unwrap()) // will only be called once
       }
     }
@@ -4311,6 +4371,16 @@ where
 
 fn serialize_source<S>(
   source: &Arc<str>,
+  serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+  S: Serializer,
+{
+  serializer.serialize_u32(source.len() as u32)
+}
+
+fn serialize_source_bytes<S>(
+  source: &Arc<[u8]>,
   serializer: S,
 ) -> Result<S::Ok, S::Error>
 where

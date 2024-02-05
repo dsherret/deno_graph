@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::ModuleInfo;
+use crate::JsModuleInfo;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct JsrPackageInfo {
@@ -73,7 +73,7 @@ impl JsrPackageVersionInfo {
     }
   }
 
-  pub fn module_info(&self, specifier: &str) -> Option<ModuleInfo> {
+  pub fn module_info(&self, specifier: &str) -> Option<JsModuleInfo> {
     let module_graph = self.module_graph.as_ref()?.as_object()?;
     let module_info = module_graph.get(specifier)?;
     serde_json::from_value(module_info.clone()).ok()

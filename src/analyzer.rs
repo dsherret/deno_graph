@@ -293,10 +293,10 @@ pub enum TypeScriptReference {
   Types(SpecifierWithRange),
 }
 
-/// Information about the module.
+/// Information about a JS/TS module.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModuleInfo {
+pub struct JsModuleInfo {
   /// Dependencies of the module.
   #[serde(skip_serializing_if = "Vec::is_empty", default)]
   pub dependencies: Vec<DependencyDescriptor>,
@@ -316,13 +316,13 @@ pub struct ModuleInfo {
 /// It can be assumed that the source has not changed since
 /// it was loaded by deno_graph.
 pub trait ModuleAnalyzer {
-  /// Analyzes the module.
-  fn analyze(
+  /// Analyzes the JS module.
+  fn analyze_js(
     &self,
     specifier: &ModuleSpecifier,
     source: Arc<str>,
     media_type: MediaType,
-  ) -> Result<ModuleInfo, Diagnostic>;
+  ) -> Result<JsModuleInfo, Diagnostic>;
 }
 
 #[cfg(test)]
@@ -339,7 +339,7 @@ mod test {
   #[test]
   fn module_info_serialization_empty() {
     // empty
-    let module_info = ModuleInfo {
+    let module_info = JsModuleInfo {
       dependencies: Vec::new(),
       ts_references: Vec::new(),
       jsx_import_source: None,
@@ -351,7 +351,7 @@ mod test {
   #[test]
   fn module_info_serialization_deps() {
     // with dependencies
-    let module_info = ModuleInfo {
+    let module_info = JsModuleInfo {
       dependencies: Vec::from([
         StaticDependencyDescriptor {
           kind: DependencyKind::ImportEquals,
@@ -450,7 +450,7 @@ mod test {
 
   #[test]
   fn module_info_serialization_ts_references() {
-    let module_info = ModuleInfo {
+    let module_info = JsModuleInfo {
       dependencies: Vec::new(),
       ts_references: Vec::from([
         TypeScriptReference::Path(SpecifierWithRange {
@@ -489,7 +489,7 @@ mod test {
 
   #[test]
   fn module_info_serialization_jsx_import_source() {
-    let module_info = ModuleInfo {
+    let module_info = JsModuleInfo {
       dependencies: Vec::new(),
       ts_references: Vec::new(),
       jsx_import_source: Some(SpecifierWithRange {
@@ -514,7 +514,7 @@ mod test {
 
   #[test]
   fn module_info_jsdoc_imports() {
-    let module_info = ModuleInfo {
+    let module_info = JsModuleInfo {
       dependencies: Vec::new(),
       ts_references: Vec::new(),
       jsx_import_source: None,
