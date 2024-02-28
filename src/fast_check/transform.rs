@@ -26,6 +26,7 @@ use crate::WorkspaceMember;
 use super::range_finder::ModulePublicRanges;
 use super::swc_helpers::any_type_ann;
 use super::swc_helpers::emit;
+use super::swc_helpers::find_dynamic_call_expr_str_arg_in_expr;
 use super::swc_helpers::get_return_stmts_with_arg_from_function_body;
 use super::swc_helpers::ident;
 use super::swc_helpers::is_never_type;
@@ -1382,6 +1383,29 @@ impl<'a> FastCheckTransformer<'a> {
         }
       }
       Expr::Paren(n) => self.maybe_infer_type_from_expr(&n.expr),
+      Expr::Await(n) => {
+        find_dynamic_call_expr_str_arg_in_expr(&n.arg).map(
+          |(call_expr, arg)| {
+            TsType::TsTypeQuery(TsTypeQuery {
+              span: DUMMY_SP,
+              expr_name: TsTypeQueryExpr::Import(TsImportType {
+                // use the same spans as the original node instead of DUMMY_SP
+                // because otherwise the module info analysis will fail because
+                // it can't find the position
+                span: call_expr.span(),
+                arg: Str {
+                  span: arg.span(),
+                  value: arg.value.clone(),
+                  raw: None,
+                },
+                qualifier: None,
+                type_args: None,
+              }),
+              type_args: None,
+            })
+          },
+        )
+      }
       Expr::This(_)
       | Expr::Array(_)
       | Expr::Object(_)
@@ -1402,7 +1426,6 @@ impl<'a> FastCheckTransformer<'a> {
       | Expr::Class(_)
       | Expr::Yield(_)
       | Expr::MetaProp(_)
-      | Expr::Await(_)
       | Expr::JSXMember(_)
       | Expr::JSXNamespacedName(_)
       | Expr::JSXEmpty(_)

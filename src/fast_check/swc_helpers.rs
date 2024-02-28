@@ -88,6 +88,24 @@ fn get_return_stmts_with_arg_from_stmt(stmt: &Stmt) -> Vec<&ReturnStmt> {
   }
 }
 
+pub fn find_dynamic_call_expr_str_arg_in_expr(
+  expr: &Expr,
+) -> Option<(&CallExpr, &Str)> {
+  let Expr::Call(call_expr) = expr else {
+    return None;
+  };
+  let Callee::Import(_) = &call_expr.callee else {
+    return None;
+  };
+  if call_expr.args.len() != 1 {
+    return None;
+  }
+  let Expr::Lit(Lit::Str(str)) = &*call_expr.args[0].expr else {
+    return None;
+  };
+  Some((call_expr, str))
+}
+
 pub fn is_void_type(return_type: &TsType) -> bool {
   is_keyword_type(return_type, TsKeywordTypeKind::TsVoidKeyword)
 }

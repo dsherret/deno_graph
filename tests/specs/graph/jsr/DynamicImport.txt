@@ -8,7 +8,7 @@
   }
 }
 # https://jsr.io/@scope/a/1.0.0/mod.ts
-const test: typeof import('./a.ts') = await import("./a.ts");
+const test = await import("./a.ts");
 export { test };
 
 # https://jsr.io/@scope/a/1.0.0/a.ts
@@ -63,19 +63,6 @@ import "jsr:@scope/a";
             "span": {
               "start": {
                 "line": 0,
-                "character": 51
-              },
-              "end": {
-                "line": 0,
-                "character": 59
-              }
-            }
-          },
-          "type": {
-            "specifier": "https://jsr.io/@scope/a/1.0.0/a.ts",
-            "span": {
-              "start": {
-                "line": 0,
                 "character": 26
               },
               "end": {
@@ -87,7 +74,7 @@ import "jsr:@scope/a";
           "isDynamic": true
         }
       ],
-      "size": 79,
+      "size": 54,
       "mediaType": "TypeScript",
       "specifier": "https://jsr.io/@scope/a/1.0.0/mod.ts"
     }
@@ -126,8 +113,8 @@ Fast check https://jsr.io/@scope/a/1.0.0/mod.ts:
       }
     }
   }
-  const test: typeof import('./a.ts') = {} as any;
+  const test: typeof import("./a.ts") = {} as any;
   export { test };
   --- DTS ---
-  declare const test: typeof import('./a.ts');
+  declare const test: typeof import("./a.ts");
   export { test };
