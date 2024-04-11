@@ -4586,18 +4586,14 @@ where
 
 #[cfg(test)]
 mod tests {
-  use crate::packages::JsrPackageInfoVersion;
-  use crate::ParserModuleAnalyzer;
   use deno_ast::dep::ImportAttribute;
-  use deno_ast::emit;
-  use deno_ast::EmitOptions;
-  use deno_ast::EmittedSource;
-  use deno_ast::SourceMap;
   use pretty_assertions::assert_eq;
   use serde_json::json;
+  use url::Url;
 
   use super::*;
-  use url::Url;
+  use crate::packages::JsrPackageInfoVersion;
+  use crate::ParserModuleAnalyzer;
 
   #[test]
   fn test_range_includes() {
@@ -5386,21 +5382,8 @@ mod tests {
       unreachable!();
     };
     let dts = fsm.dts.unwrap();
-    let source_map =
-      SourceMap::single(module.specifier.clone(), module.source.to_string());
-    let EmittedSource { text, .. } = emit(
-      &dts.program,
-      &dts.comments,
-      &source_map,
-      &EmitOptions {
-        keep_comments: true,
-        source_map: deno_ast::SourceMapOption::None,
-        ..Default::default()
-      },
-    )
-    .unwrap();
     assert_eq!(
-      text.trim(),
+      dts.text.trim(),
       "export declare function add(a: number, b: number): number;"
     );
     assert!(dts.diagnostics.is_empty());
@@ -5468,22 +5451,7 @@ mod tests {
         unreachable!();
       };
       let dts = fsm.dts.unwrap();
-      let source_map = SourceMap::single(
-        module.specifier().clone(),
-        module.source().unwrap().to_string(),
-      );
-      let EmittedSource { text, .. } = emit(
-        &dts.program,
-        &dts.comments,
-        &source_map,
-        &EmitOptions {
-          keep_comments: true,
-          source_map: deno_ast::SourceMapOption::None,
-          ..Default::default()
-        },
-      )
-      .unwrap();
-      assert_eq!(text.trim(), "export * from 'jsr:@package/foo';");
+      assert_eq!(dts.text.trim(), "export * from 'jsr:@package/foo';");
       assert!(dts.diagnostics.is_empty());
     }
 

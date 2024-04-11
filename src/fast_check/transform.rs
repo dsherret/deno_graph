@@ -15,7 +15,6 @@ use deno_ast::swc::common::comments::SingleThreadedCommentsMapInner;
 use deno_ast::swc::common::Spanned;
 use deno_ast::swc::common::DUMMY_SP;
 use deno_ast::EmitOptions;
-use deno_ast::EmittedSource;
 use deno_ast::ModuleSpecifier;
 use deno_ast::MultiThreadedComments;
 use deno_ast::ParsedSource;
@@ -82,8 +81,7 @@ impl CommentsMut {
 
 #[derive(Debug, Clone)]
 pub struct FastCheckDtsModule {
-  pub program: Program,
-  pub comments: SingleThreadedComments,
+  pub text: String,
   pub diagnostics: Vec<FastCheckDtsDiagnostic>,
 }
 
@@ -144,7 +142,7 @@ pub fn transform(
     parsed_source.text_info().text_str().to_owned(),
   );
   let program = Program::Module(module);
-  let EmittedSource { text, source_map } = emit(
+  let emitted_source = emit(
     &program,
     &fast_check_comments,
     &source_map,
@@ -166,10 +164,25 @@ pub fn transform(
       FastCheckDtsTransformer::new(parsed_source.text_info(), specifier);
 
     let module = dts_transformer.transform(program.expect_module())?;
+    let dts_emit = emit(
+      &Program::Module(module),
+      &dts_comments,
+      &source_map,
+      &EmitOptions {
+        keep_comments: true,
+        source_map: deno_ast::SourceMapOption::None,
+        inline_sources: false,
+      },
+    )
+    .map_err(|e| {
+      vec![FastCheckDiagnostic::Emit {
+        specifier: specifier.clone(),
+        inner: Arc::new(e),
+      }]
+    })?;
 
     Some(FastCheckDtsModule {
-      program: Program::Module(module),
-      comments: dts_comments,
+      text: dts_emit.text,
       diagnostics: dts_transformer.diagnostics,
     })
   } else {
@@ -178,9 +191,9 @@ pub fn transform(
 
   Ok(FastCheckModule {
     module_info: module_info.into(),
-    text: text.into(),
+    text: emitted_source.text.into(),
     dts,
-    source_map: source_map.unwrap().into_bytes().into(),
+    source_map: emitted_source.source_map.unwrap().into_bytes().into(),
   })
 }
 
