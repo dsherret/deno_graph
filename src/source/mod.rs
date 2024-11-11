@@ -364,6 +364,8 @@ pub enum ResolveError {
   Other(#[from] anyhow::Error),
 }
 
+pub type NodeModuleKind = deno_package_json::NodeModuleKind;
+
 /// The kind of resolution currently being done by deno_graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionMode {
@@ -405,12 +407,22 @@ pub trait Resolver: fmt::Debug {
     DEFAULT_JSX_IMPORT_SOURCE_MODULE
   }
 
+  fn resolve_node_module_kind(
+    &self,
+    _specifier: &ModuleSpecifier,
+    _media_type: MediaType,
+    _is_script: bool,
+  ) -> Result<NodeModuleKind, anyhow::Error> {
+    Ok(NodeModuleKind::Esm)
+  }
+
   /// Given a string specifier and a referring module specifier, return a
   /// resolved module specifier.
   fn resolve(
     &self,
     specifier_text: &str,
     referrer_range: &Range,
+    _referrer_kind: NodeModuleKind,
     _mode: ResolutionMode,
   ) -> Result<ModuleSpecifier, ResolveError> {
     Ok(resolve_import(specifier_text, &referrer_range.specifier)?)
@@ -901,6 +913,7 @@ pub mod tests {
       &self,
       specifier: &str,
       referrer_range: &Range,
+      _referrer_kind: NodeModuleKind,
       _mode: ResolutionMode,
     ) -> Result<ModuleSpecifier, ResolveError> {
       if let Some(map) = self.map.get(&referrer_range.specifier) {

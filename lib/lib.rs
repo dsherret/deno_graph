@@ -13,6 +13,7 @@ use deno_graph::source::CacheInfo;
 use deno_graph::source::LoadFuture;
 use deno_graph::source::LoadOptions;
 use deno_graph::source::Loader;
+use deno_graph::source::NodeModuleKind;
 use deno_graph::source::NullFileSystem;
 use deno_graph::source::ResolutionMode;
 use deno_graph::source::ResolveError;
@@ -160,13 +161,18 @@ impl Resolver for JsResolver {
     &self,
     specifier: &str,
     referrer_range: &Range,
+    referrer_kind: NodeModuleKind,
     _mode: ResolutionMode,
   ) -> Result<ModuleSpecifier, ResolveError> {
     if let Some(resolve) = &self.maybe_resolve {
       let this = JsValue::null();
       let arg1 = JsValue::from(specifier);
       let arg2 = JsValue::from(referrer_range.specifier.to_string());
-      let value = match resolve.call2(&this, &arg1, &arg2) {
+      let arg3 = JsValue::from(match referrer_kind {
+        NodeModuleKind::Esm => "esm",
+        NodeModuleKind::Cjs => "cjs",
+      });
+      let value = match resolve.call3(&this, &arg1, &arg2, &arg3) {
         Ok(value) => value,
         Err(_) => return Err(anyhow!("JavaScript resolve threw.").into()),
       };
@@ -252,6 +258,7 @@ pub async fn js_create_graph(
         .map_err(|err| JsValue::from(js_sys::Error::new(&err.to_string())))?;
       imports.push(ReferrerImports {
         referrer,
+        referrer_kind: NodeModuleKind::Esm,
         imports: specifier_vec,
       });
     }

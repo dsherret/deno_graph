@@ -21,6 +21,7 @@ mod text_encoding;
 
 use source::FileSystem;
 use source::JsrUrlProvider;
+use source::NodeModuleKind;
 use source::NpmResolver;
 use source::Resolver;
 
@@ -104,6 +105,7 @@ pub use deno_ast::dep::StaticDependencyKind;
 pub struct ReferrerImports {
   /// The referrer to resolve the imports from.
   pub referrer: ModuleSpecifier,
+  pub referrer_kind: NodeModuleKind,
   /// Specifiers relative to the referrer to resolve.
   pub imports: Vec<String>,
 }
@@ -154,6 +156,7 @@ pub async fn parse_module(
 pub struct ParseModuleFromAstOptions<'a> {
   pub graph_kind: GraphKind,
   pub specifier: ModuleSpecifier,
+  pub node_module_kind: NodeModuleKind,
   pub maybe_headers: Option<&'a HashMap<String, String>>,
   pub parsed_source: &'a deno_ast::ParsedSource,
   pub file_system: &'a dyn FileSystem,
@@ -168,6 +171,7 @@ pub fn parse_module_from_ast(options: ParseModuleFromAstOptions) -> JsModule {
     options.graph_kind,
     options.specifier,
     options.parsed_source.media_type(),
+    options.node_module_kind,
     options.maybe_headers,
     ParserModuleAnalyzer::module_info(options.parsed_source),
     options.parsed_source.text().clone(),
@@ -195,6 +199,7 @@ mod tests {
   use source::tests::MockResolver;
   use source::CacheInfo;
   use source::MemoryLoader;
+  use source::NodeModuleKind;
   use source::NpmResolvePkgReqsResult;
   use source::Source;
   use std::cell::RefCell;
@@ -681,6 +686,7 @@ console.log(a);
       ModuleSpecifier::parse("file:///a/tsconfig.json").unwrap();
     let imports = vec![ReferrerImports {
       referrer: config_specifier,
+      referrer_kind: NodeModuleKind::Esm,
       imports: vec!["./types.d.ts".to_string()],
     }];
     let mut graph = ModuleGraph::new(GraphKind::All);
@@ -809,6 +815,7 @@ console.log(a);
       ModuleSpecifier::parse("file:///a/deno.json").unwrap();
     let imports = vec![ReferrerImports {
       referrer: config_specifier,
+      referrer_kind: NodeModuleKind::Esm,
       imports: vec!["https://esm.sh/preact/runtime-jsx".to_string()],
     }];
     let mut graph = ModuleGraph::new(GraphKind::All);
@@ -935,6 +942,7 @@ console.log(a);
       ModuleSpecifier::parse("file:///a/tsconfig.json").unwrap();
     let imports = vec![ReferrerImports {
       referrer: config_specifier.clone(),
+      referrer_kind: NodeModuleKind::Esm,
       imports: vec!["https://example.com/jsx-runtime".to_string()],
     }];
     let mut graph = ModuleGraph::new(GraphKind::All);
@@ -1319,6 +1327,7 @@ console.log(a);
       &self,
       specifier_text: &str,
       referrer_range: &Range,
+      _referrer_kind: NodeModuleKind,
       _mode: ResolutionMode,
     ) -> Result<deno_ast::ModuleSpecifier, source::ResolveError> {
       use import_map::ImportMapError;

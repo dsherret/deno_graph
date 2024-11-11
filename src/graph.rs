@@ -228,6 +228,8 @@ pub enum ModuleLoadError {
   #[error(transparent)]
   Loader(Arc<anyhow::Error>),
   #[error(transparent)]
+  NodeModuleKindResolution(Arc<anyhow::Error>),
+  #[error(transparent)]
   Jsr(#[from] JsrLoadError),
   #[error(transparent)]
   NodeUnknownBuiltinModule(#[from] UnknownBuiltInNodeModuleError),
@@ -733,6 +735,7 @@ impl Dependency {
   pub fn with_new_resolver(
     &self,
     specifier: &str,
+    node_module_kind: NodeModuleKind,
     jsr_url_provider: &dyn JsrUrlProvider,
     maybe_resolver: Option<&dyn Resolver>,
     maybe_npm_resolver: Option<&dyn NpmResolver>,
@@ -744,6 +747,7 @@ impl Dependency {
         resolve(
           specifier,
           r.clone(),
+          node_module_kind,
           ResolutionMode::Execution,
           jsr_url_provider,
           maybe_resolver,
@@ -761,6 +765,7 @@ impl Dependency {
             .as_deref()
             .unwrap_or(specifier),
           r.clone(),
+          node_module_kind,
           ResolutionMode::Types,
           jsr_url_provider,
           maybe_resolver,
@@ -789,6 +794,7 @@ pub struct TypesDependency {
 impl TypesDependency {
   pub fn with_new_resolver(
     &self,
+    node_module_kind: NodeModuleKind,
     jsr_url_provider: &dyn JsrUrlProvider,
     maybe_resolver: Option<&dyn Resolver>,
     maybe_npm_resolver: Option<&dyn NpmResolver>,
@@ -800,6 +806,7 @@ impl TypesDependency {
         resolve(
           &self.specifier,
           r.clone(),
+          node_module_kind,
           ResolutionMode::Types,
           jsr_url_provider,
           maybe_resolver,
@@ -983,8 +990,6 @@ pub struct FastCheckTypeModule {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsModule {
-  #[serde(skip_serializing)]
-  pub is_script: bool,
   #[serde(
     skip_serializing_if = "IndexMap::is_empty",
     serialize_with = "serialize_dependencies"
@@ -998,6 +1003,8 @@ pub struct JsModule {
   pub maybe_types_dependency: Option<TypesDependency>,
   #[serde(skip_serializing_if = "is_media_type_unknown")]
   pub media_type: MediaType,
+  #[serde(skip_serializing)]
+  pub node_module_kind: NodeModuleKind,
   pub specifier: ModuleSpecifier,
   #[serde(skip_serializing)]
   pub fast_check: Option<FastCheckTypeModuleSlot>,
@@ -1006,12 +1013,12 @@ pub struct JsModule {
 impl JsModule {
   fn new(specifier: ModuleSpecifier, source: Arc<str>) -> Self {
     Self {
-      is_script: false,
       dependencies: Default::default(),
       maybe_cache_info: None,
       source,
       maybe_types_dependency: None,
       media_type: MediaType::Unknown,
+      node_module_kind: NodeModuleKind::Esm,
       specifier,
       fast_check: None,
     }
@@ -1100,6 +1107,7 @@ pub struct GraphImport {
 impl GraphImport {
   pub fn new(
     referrer: &ModuleSpecifier,
+    referrer_kind: NodeModuleKind,
     imports: Vec<String>,
     jsr_url_provider: &dyn JsrUrlProvider,
     maybe_resolver: Option<&dyn Resolver>,
@@ -1116,6 +1124,7 @@ impl GraphImport {
         let maybe_type = resolve(
           &import,
           referrer_range,
+          referrer_kind,
           ResolutionMode::Types,
           jsr_url_provider,
           maybe_resolver,
@@ -1731,6 +1740,7 @@ impl ModuleGraph {
               Err(module_info) => module_info.dependencies.clone(),
             },
             &module.specifier,
+            module.node_module_kind,
             &mut dependencies,
             // no need to resolve dynamic imports
             &NullFileSystem,
@@ -2056,13 +2066,14 @@ impl ModuleGraph {
 fn resolve(
   specifier_text: &str,
   referrer_range: Range,
+  referrer_kind: NodeModuleKind,
   mode: ResolutionMode,
   jsr_url_provider: &dyn JsrUrlProvider,
   maybe_resolver: Option<&dyn Resolver>,
   maybe_npm_resolver: Option<&dyn NpmResolver>,
 ) -> Resolution {
   let response = if let Some(resolver) = maybe_resolver {
-    resolver.resolve(specifier_text, &referrer_range, mode)
+    resolver.resolve(specifier_text, &referrer_range, referrer_kind, mode)
   } else {
     resolve_import(specifier_text, &referrer_range.specifier)
       .map_err(|err| err.into())
@@ -2357,18 +2368,40 @@ pub(crate) fn parse_module(
       source,
       maybe_headers,
       module_info,
-    } => Ok(Module::Js(parse_js_module_from_module_info(
-      options.graph_kind,
-      specifier,
-      media_type,
-      maybe_headers.as_ref(),
-      *module_info,
-      source,
-      file_system,
-      jsr_url_provider,
-      maybe_resolver,
-      maybe_npm_resolver,
-    ))),
+    } => {
+      let node_module_kind = match &maybe_resolver {
+        Some(resolver) => {
+          match resolver.resolve_node_module_kind(
+            &specifier,
+            media_type,
+            module_info.is_script,
+          ) {
+            Ok(kind) => kind,
+            Err(err) => {
+              return Err(ModuleError::LoadingErr(
+                specifier,
+                None,
+                ModuleLoadError::NodeModuleKindResolution(Arc::new(err)),
+              ));
+            }
+          }
+        }
+        None => NodeModuleKind::Esm,
+      };
+      Ok(Module::Js(parse_js_module_from_module_info(
+        options.graph_kind,
+        specifier,
+        media_type,
+        node_module_kind,
+        maybe_headers.as_ref(),
+        *module_info,
+        source,
+        file_system,
+        jsr_url_provider,
+        maybe_resolver,
+        maybe_npm_resolver,
+      )))
+    }
   }
 }
 
@@ -2377,6 +2410,7 @@ pub(crate) fn parse_js_module_from_module_info(
   graph_kind: GraphKind,
   specifier: ModuleSpecifier,
   media_type: MediaType,
+  node_module_kind: NodeModuleKind,
   maybe_headers: Option<&HashMap<String, String>>,
   module_info: ModuleInfo,
   source: Arc<str>,
@@ -2386,8 +2420,8 @@ pub(crate) fn parse_js_module_from_module_info(
   maybe_npm_resolver: Option<&dyn NpmResolver>,
 ) -> JsModule {
   let mut module = JsModule::new(specifier, source);
-  module.is_script = module_info.is_script;
   module.media_type = media_type;
+  module.node_module_kind = node_module_kind;
 
   // Analyze the TypeScript triple-slash references and self types specifier
   if graph_kind.include_types() {
@@ -2398,7 +2432,8 @@ pub(crate) fn parse_js_module_from_module_info(
         specifier: specifier.text.clone(),
         dependency: resolve(
           &specifier.text,
-          range.clone(),
+          range,
+          module.node_module_kind,
           ResolutionMode::Types,
           jsr_url_provider,
           maybe_resolver,
@@ -2422,6 +2457,7 @@ pub(crate) fn parse_js_module_from_module_info(
             dep.maybe_type = resolve(
               &specifier.text,
               range.clone(),
+              module.node_module_kind,
               ResolutionMode::Types,
               jsr_url_provider,
               maybe_resolver,
@@ -2448,6 +2484,7 @@ pub(crate) fn parse_js_module_from_module_info(
           let dep_resolution = resolve(
             &specifier.text,
             range.clone(),
+            module.node_module_kind,
             ResolutionMode::Types,
             jsr_url_provider,
             maybe_resolver,
@@ -2533,6 +2570,7 @@ pub(crate) fn parse_js_module_from_module_info(
         dep.maybe_code = resolve(
           &specifier_text,
           range.clone(),
+          module.node_module_kind,
           ResolutionMode::Execution,
           jsr_url_provider,
           maybe_resolver,
@@ -2566,6 +2604,7 @@ pub(crate) fn parse_js_module_from_module_info(
           dep.maybe_type = resolve(
             &specifier_text,
             range,
+            module.node_module_kind,
             ResolutionMode::Types,
             jsr_url_provider,
             maybe_resolver,
@@ -2576,6 +2615,7 @@ pub(crate) fn parse_js_module_from_module_info(
           let types_resolution = resolve(
             &specifier_text,
             range.clone(),
+            module.node_module_kind,
             ResolutionMode::Types,
             jsr_url_provider,
             maybe_resolver,
@@ -2611,6 +2651,7 @@ pub(crate) fn parse_js_module_from_module_info(
         dep.maybe_type = resolve(
           &specifier.text,
           specifier_range.clone(),
+          module.node_module_kind,
           ResolutionMode::Types,
           jsr_url_provider,
           maybe_resolver,
@@ -2641,6 +2682,7 @@ pub(crate) fn parse_js_module_from_module_info(
           dependency: resolve(
             types_header,
             range,
+            module.node_module_kind,
             ResolutionMode::Types,
             jsr_url_provider,
             maybe_resolver,
@@ -2699,6 +2741,7 @@ pub(crate) fn parse_js_module_from_module_info(
     graph_kind,
     module_info.dependencies,
     &module.specifier,
+    module.node_module_kind,
     &mut module.dependencies,
     file_system,
     jsr_url_provider,
@@ -2715,6 +2758,7 @@ fn fill_module_dependencies(
   graph_kind: GraphKind,
   dependencies: Vec<DependencyDescriptor>,
   module_specifier: &ModuleSpecifier,
+  node_module_kind: NodeModuleKind,
   module_dependencies: &mut IndexMap<String, Dependency>,
   file_system: &dyn FileSystem,
   jsr_url_provider: &dyn JsrUrlProvider,
@@ -2811,6 +2855,7 @@ fn fill_module_dependencies(
               module_specifier.clone(),
               types_specifier.range,
             ),
+            node_module_kind,
             ResolutionMode::Types,
             jsr_url_provider,
             maybe_resolver,
@@ -2823,6 +2868,7 @@ fn fill_module_dependencies(
           dep.maybe_type = resolve(
             &import.specifier,
             import.specifier_range.clone(),
+            node_module_kind,
             ResolutionMode::Types,
             jsr_url_provider,
             maybe_resolver,
@@ -2835,6 +2881,7 @@ fn fill_module_dependencies(
         dep.maybe_code = resolve(
           &import.specifier,
           import.specifier_range.clone(),
+          node_module_kind,
           ResolutionMode::Execution,
           jsr_url_provider,
           maybe_resolver,
@@ -2852,6 +2899,7 @@ fn fill_module_dependencies(
         let maybe_type = resolve(
           &import.specifier,
           import.specifier_range.clone(),
+          node_module_kind,
           ResolutionMode::Types,
           jsr_url_provider,
           maybe_resolver,
@@ -3417,6 +3465,7 @@ impl<'a, 'graph> Builder<'a, 'graph> {
       let imports = referrer_imports.imports;
       let graph_import = GraphImport::new(
         &referrer,
+        referrer_imports.referrer_kind,
         imports,
         self.jsr_url_provider,
         self.resolver,
@@ -5309,8 +5358,13 @@ mod tests {
       maybe_deno_types_specifier: Some("./b.d.ts".to_string()),
       ..Default::default()
     };
-    let new_dependency =
-      dependency.with_new_resolver("./b.ts", Default::default(), None, None);
+    let new_dependency = dependency.with_new_resolver(
+      "./b.ts",
+      NodeModuleKind::Esm,
+      Default::default(),
+      None,
+      None,
+    );
     assert_eq!(
       new_dependency,
       Dependency {
@@ -5350,8 +5404,12 @@ mod tests {
         },
       })),
     };
-    let new_types_dependency =
-      types_dependency.with_new_resolver(Default::default(), None, None);
+    let new_types_dependency = types_dependency.with_new_resolver(
+      NodeModuleKind::Esm,
+      Default::default(),
+      None,
+      None,
+    );
     assert_eq!(
       new_types_dependency,
       TypesDependency {
@@ -6093,6 +6151,7 @@ mod tests {
         &self,
         specifier_text: &str,
         referrer_range: &Range,
+        _referrer_kind: NodeModuleKind,
         mode: ResolutionMode,
       ) -> Result<ModuleSpecifier, ResolveError> {
         if specifier_text == "foo/jsx-runtime" {

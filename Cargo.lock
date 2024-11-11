@@ -388,6 +388,7 @@ dependencies = [
  "bincode",
  "data-url",
  "deno_ast",
+ "deno_package_json",
  "deno_semver",
  "deno_terminal",
  "deno_unsync",
@@ -440,6 +441,20 @@ checksum = "7fcf552fbdedbe81c89705349d7d2485c7051382b000dfddbdbf7fc25931cf83"
 dependencies = [
  "data-url",
  "serde",
+ "url",
+]
+
+[[package]]
+name = "deno_package_json"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cbc4c4d3eb0960b58e8f43f9fc2d3f620fcac9a03cd85203e08db5b04e83c1f"
+dependencies = [
+ "deno_semver",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "thiserror",
  "url",
 ]
 
